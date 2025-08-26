@@ -1,0 +1,200 @@
+'@Folder("Configuration")
+Option Explicit
+
+'================================================================================================
+' Module:      mConfiguration
+' Purpose:     This module defines all global constants and utility functions for the project.
+'              It acts as a central control panel for sheet names, column positions,
+'              and business logic enumerations.
+' Version:     40.0
+' Author:      Ayush Goyal
+' Date:        26-Aug-2025
+'
+' Change Log:
+' V40.0:       - REFACTOR: Replaced 'psPhaseInOut' status with distinct 'psPhaseOut'
+'                and 'psPhaseIn' statuses for clarity in lifecycle management.
+' V39.0:       - BUGFIX: Moved GetStatusEnum, dictStatusMap, and InitializeStatusMap
+'                from the old mForecasting module to here. This is their correct
+'                location and fixes the "Sub or function not defined" compile error.
+' V38.1:       - BUGFIX: Reverted Friend subs to Public with optional parameter.
+'================================================================================================
+
+' --- DEBUGGING & LOGGING FLAGS ---
+Public Const DEBUG_MODE As Boolean = False 'TRUE: Prevents file saving, adds more logs. FALSE: Normal operation.
+
+' --- SHEET NAME CONSTANTS ---
+Public Const SHEET_STATUS As String = "Product Status"
+Public Const SHEET_DEMAND As String = "Demand Forecast"
+Public Const SHEET_HISTORY As String = "Historical Sales"
+Public Const SHEET_LOG As String = "Log"
+
+' --- CALCULATION ENGINE CONFIGURATION ---
+Public Const CALC_AFFILIATE_DIM As String = "Affiliate"
+Public Const CALC_TOTAL_LEVEL_DIM As String = "ForecastTier"
+Public Const CALC_SHARE_LEVEL_DIM As String = "ForecastSubTier"
+Public Const CALC_KEY_FIGURE_DIM As String = "KeyFigure"
+
+' --- GLOBAL CONFIGURATION OBJECTS ---
+Public g_dsProductStatus As cDataSource
+Public g_dsHistory As cDataSource
+Public g_dsDemand As cDataSource
+Private pTierReportCols As Collection
+Private pSummaryReportCols As Collection
+Private dictStatusMap As Object
+
+' --- ENUMERATIONS ---
+Public Enum ProductStatus
+    psUnknown = 0
+    psActive = 1
+    psPhaseOut = 2      ' Replaces psPhaseInOut
+    psDiscontinued = 3
+    psNew = 4
+    psPhaseIn = 5       ' New status for successors
+End Enum
+
+Public Enum logType
+    ltInfo
+    ltWarning
+    ltError
+    ltFatal
+    ltProfile
+End Enum
+
+'================================================================================================
+'--- GLOBAL INITIALIZATION & UTILITY FUNCTIONS ---
+'================================================================================================
+
+Public Sub InitializeAllConfigs(Optional ByVal dummy As Boolean)
+    InitializeStatusMap
+    InitializeProductStatusSource
+    InitializeHistorySource
+    InitializeDemandSource
+    InitializeTierReportConfig
+    InitializeSummaryReportConfig
+End Sub
+
+Public Sub CleanupAllConfigs(Optional ByVal dummy As Boolean)
+    Set pTierReportCols = Nothing
+    Set pSummaryReportCols = Nothing
+    Set g_dsProductStatus = Nothing
+    Set g_dsHistory = Nothing
+    Set g_dsDemand = Nothing
+    Set dictStatusMap = Nothing
+End Sub
+
+' --- Status Mapping ---
+Private Sub InitializeStatusMap()
+    Set dictStatusMap = CreateObject("Scripting.Dictionary")
+    dictStatusMap.CompareMode = vbTextCompare
+    dictStatusMap.Add "ACTIVE", psActive
+    dictStatusMap.Add "PHASE OUT", psPhaseOut          ' Changed from PHASEIN-PHASEOUT
+    dictStatusMap.Add "PHASE IN", psPhaseIn            ' Added new status
+    dictStatusMap.Add "DISCONTINUED", psDiscontinued
+    dictStatusMap.Add "NEW", psNew
+End Sub
+
+Public Function GetStatusEnum(ByVal strStatus As String) As ProductStatus
+    Dim strKey As String: strKey = UCase$(Trim$(strStatus))
+    If dictStatusMap.Exists(strKey) Then
+        GetStatusEnum = dictStatusMap.item(strKey)
+    Else
+        GetStatusEnum = psUnknown
+    End If
+End Function
+
+Public Function GetStatusString(ByVal enmStatus As ProductStatus) As String
+    Select Case enmStatus
+        Case psActive: GetStatusString = "Active"
+        Case psPhaseOut: GetStatusString = "Phase Out" ' Changed from PhaseIn-PhaseOut
+        Case psPhaseIn: GetStatusString = "Phase In"   ' Added new status
+        Case psDiscontinued: GetStatusString = "Discontinued"
+        Case psNew: GetStatusString = "New"
+        Case Else: GetStatusString = "Unknown"
+    End Select
+End Function
+
+' --- Report Configuration ---
+Public Function GetTierReportCols() As Collection
+    Set GetTierReportCols = pTierReportCols
+End Function
+
+Public Function GetSummaryReportCols() As Collection
+    Set GetSummaryReportCols = pSummaryReportCols
+End Function
+
+Private Sub InitializeTierReportConfig()
+    Set pTierReportCols = New Collection
+    AddReportColumn pTierReportCols, "Key Figures", "KeyFigure", 25, "@"
+    AddReportColumn pTierReportCols, "Affiliate", "Affiliate", 10, "@"
+    AddReportColumn pTierReportCols, "Forecast Tier", "ForecastTier", 30, "@"
+    AddReportColumn pTierReportCols, "Forecast Sub-Tier", "ForecastSubTier", 20, "@"
+    AddReportColumn pTierReportCols, "Local Item Nbr", "LocalItemNbr", 18, "@"
+    AddReportColumn pTierReportCols, "Desc", "Description", 40, "@"
+    AddReportColumn pTierReportCols, "I-S-D", "ISD", 15, "@"
+    AddReportColumn pTierReportCols, "Status", "StatusString", 20, "@"
+    AddReportColumn pTierReportCols, "Phase Out Month", "PhaseOutDate", 15, "mmm-yy"
+End Sub
+
+Private Sub InitializeSummaryReportConfig()
+    Set pSummaryReportCols = New Collection
+    AddReportColumn pSummaryReportCols, "Affiliate", "Affiliate", 10, "@"
+    AddReportColumn pSummaryReportCols, "Forecast Tier", "ForecastTier", 30, "@"
+    AddReportColumn pSummaryReportCols, "Forecast Sub-Tier", "ForecastSubTier", 20, "@"
+    AddReportColumn pSummaryReportCols, "Local Item Nbr", "LocalItemNbr", 18, "@"
+    AddReportColumn pSummaryReportCols, "Desc", "Description", 40, "@"
+    AddReportColumn pSummaryReportCols, "I-S-D", "ISD", 15, "@"
+    AddReportColumn pSummaryReportCols, "Status", "StatusString", 20, "@"
+    AddReportColumn pSummaryReportCols, "Phase Out Month", "PhaseOutDate", 15, "mmm-yy"
+End Sub
+
+Private Sub AddReportColumn(ByVal colReport As Collection, ByVal header As String, ByVal prop As String, ByVal width As Double, ByVal format As String)
+    Dim col As cReportColumn
+    Set col = New cReportColumn
+    col.HeaderText = header
+    col.SourceProperty = prop
+    col.ColumnWidth = width
+    col.NumberFormat = format
+    colReport.Add col
+End Sub
+
+' --- Data Source Configuration ---
+Private Sub InitializeProductStatusSource()
+    Set g_dsProductStatus = New cDataSource
+    With g_dsProductStatus
+        .sheetName = SHEET_STATUS
+        .MapField "Affiliate", 1
+        .MapField "Tier", 2
+        .MapField "SubTier", 3
+        .MapField "LocalItemNbr", 4
+        .MapField "Description", 5
+        .MapField "ISD", 6
+        .MapField "Status", 7
+        .MapField "PhaseOutDate", 8
+        .MapField "PhaseOutPercent", 9
+        .MapField "SupersededBy", 10
+    End With
+End Sub
+
+Private Sub InitializeHistorySource()
+    Set g_dsHistory = New cDataSource
+    With g_dsHistory
+        .sheetName = SHEET_HISTORY
+        .MapField "Affiliate", 1
+        .MapField "Tier", 2
+        .MapField "SubTier", 3
+        .MapField "KeyFigure", 4
+        .MapField "LocalItemNbr", 5
+        .StartOfMonthsCol = 8
+    End With
+End Sub
+
+Private Sub InitializeDemandSource()
+    Set g_dsDemand = New cDataSource
+    With g_dsDemand
+        .sheetName = SHEET_DEMAND
+        .MapField "Affiliate", 1
+        .MapField "KeyFigure", 2
+        .MapField "Tier", 3
+        .StartOfMonthsCol = 4
+    End With
+End Sub
